@@ -1,5 +1,5 @@
 // Vinyl Crate service worker: app shell offline, cover images and fonts cached.
-const SHELL = 'vc-shell-v1', IMG = 'vc-img-v1', FONT = 'vc-font-v1';
+const SHELL = 'vc-shell-v2', IMG = 'vc-img-v1', FONT = 'vc-font-v1';
 const FILES = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(SHELL).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {

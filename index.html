@@ -69,6 +69,11 @@ header{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.disc .spin{animation:none}.disc{transition:none}}
 .disc .grooves{position:absolute;inset:0;border-radius:50%;background:repeating-radial-gradient(circle at 50% 50%,rgba(0,0,0,.18) 0 1px,rgba(255,255,255,.035) 1px 2.4px);mask:radial-gradient(circle,transparent 0 17%,#000 17.5% 48.5%,transparent 49%);-webkit-mask:radial-gradient(circle,transparent 0 17%,#000 17.5% 48.5%,transparent 49%)}
+.item.nodisc .disc{display:none}
+.item.cd .disc .grooves{display:none}
+.item.cd .disc .lbl{inset:20%;box-shadow:0 0 0 1px rgba(255,255,255,.35)}
+.item.cd .disc .lbl::after{inset:39.5%;box-shadow:0 0 0 3px rgba(220,225,232,.55)}
+.ftag{font-family:var(--f-mono);font-size:.66rem;letter-spacing:.06em;color:var(--night);background:var(--dim);border-radius:4px;padding:1px 5px}
 .disc .lbl{position:absolute;inset:32%;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 2px rgba(0,0,0,.35)}
 .disc .lbl::after{content:"";position:absolute;inset:44%;border-radius:50%;background:var(--night)}
 .disc .sheen{position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 20deg,transparent 0 8%,rgba(255,255,255,.16) 12%,transparent 18% 50%,rgba(255,255,255,.12) 58%,transparent 64%);pointer-events:none}
@@ -200,6 +205,7 @@ img{max-width:100%}
     </div>
     <div class="panel" id="panel" hidden>
       <div class="search"><input id="q" type="search" placeholder="Artiest, titel, label of stijl" autocomplete="off" enterkeyhint="search"></div>
+      <div class="chips" id="chipsF" role="group" aria-label="Formaat" hidden></div>
       <div class="chips" id="chipsA" role="group" aria-label="Genre"></div>
       <div class="chips" id="chipsB" role="group" aria-label="Decennium en vinyl"></div>
     </div>
@@ -228,11 +234,13 @@ img{max-width:100%}
   let ALL = [], LIST = [], els = new Map();
   let rolling = false;
   let pos = 0, target = 0, vel = 0, anim = null, settledTimer = null, flippedId = null;
-  const state = { q: '', genre: null, decade: null, colored: false };
+  const state = { q: '', genre: null, decade: null, colored: false, format: null };
+  const fmtOf = r => r.fm || 'Vinyl';
   const store = {
     get(k){ try { return localStorage.getItem(k); } catch(e){ return null; } },
     set(k,v){ try { localStorage.setItem(k,v); } catch(e){} }
   };
+  state.format = store.get('dv-fmt') || null;
 
   // ---------- data ----------
   const API = 'https://api.discogs.com';
@@ -275,8 +283,9 @@ img{max-width:100%}
   function toRec(it){
     const b = it.basic_information, fm = b.formats || [], texts = fm.map(f => f.text || '');
     const a = (b.artists || []).map(x => clean(x.anv || x.name) + (x.join && x.join !== ',' ? ' ' + x.join + ' ' : x.join === ',' ? ', ' : '')).join('').trim();
-    const v = vinyl(texts), lab = (b.labels || [])[0] || {};
-    return { id: b.id, mid: b.master_id || 0, a, s: clean((b.artists || [{ name: '' }])[0].name).replace(/^(the|de)\s+/i, '').toLowerCase(),
+    const fmt = (fm.find(f => !/^(box set|all media)$/i.test(f.name || '')) || fm[0] || {}).name || 'Vinyl';
+    const v = fmt === 'Vinyl' ? vinyl(texts) : null, lab = (b.labels || [])[0] || {};
+    return { id: b.id, mid: b.master_id || 0, fm: fmt, a, s: clean((b.artists || [{ name: '' }])[0].name).replace(/^(the|de)\s+/i, '').toLowerCase(),
       t: b.title, y: b.year || null, l: lab.name || '', c: lab.catno || '', g: b.genres || [], st: b.styles || [],
       f: texts.filter(Boolean).join(', '), v, img: /^https:\/\//.test(b.cover_image || '') && !/spacer\.gif/.test(b.cover_image) ? b.cover_image : '',
       tint: v ? v.colors[0] : GLOWS[b.id % GLOWS.length], u: 'https://www.discogs.com/release/' + b.id, add: (it.date_added || '').slice(0, 10) };
@@ -287,7 +296,7 @@ img{max-width:100%}
     const d = getDet(r.id);
     if (d){ r.oy = d.oy && d.oy !== r.y ? d.oy : null; r.tl = d.tl; r.co = d.co; }
     r.sy = r.oy || r.y || 9999;
-    r.hay = [r.a, r.t, r.l, r.c, ...r.st, ...((r.tl || []).map(t => t.t))].join(' ').toLowerCase();
+    r.hay = [r.a, r.t, r.l, r.c, r.fm || '', ...r.st, ...((r.tl || []).map(t => t.t))].join(' ').toLowerCase();
     return r;
   }
   function useRecords(recs, keepPos){
@@ -387,8 +396,9 @@ img{max-width:100%}
       (!q || q.split(/\s+/).every(w => r.hay.includes(w))) &&
       (!state.genre || r.g.includes(state.genre)) &&
       (!state.decade || (Math.floor(r.sy/10)*10) === state.decade) &&
-      (!state.colored || r.v));
-    $('fdot').hidden = !(q || state.genre || state.decade || state.colored);
+      (!state.colored || r.v) &&
+      (!state.format || fmtOf(r) === state.format));
+    $('fdot').hidden = !(q || state.genre || state.decade || state.colored || state.format);
     stage.textContent = ''; els.clear(); flippedId = null;
     if (!LIST.length){
       const e = document.createElement('div'); e.className = 'empty';
@@ -398,12 +408,14 @@ img{max-width:100%}
     let start = 0;
     if (initial){ const last = +store.get('dv-last'); const i = LIST.findIndex(r => r.id === last); if (i >= 0) start = i; }
     pos = target = start; vel = 0;
+    render._last = null;
     buildLetters();
     layout(); render(); settle();
   }
 
   // ---------- disc look ----------
   function hexA(h, a){ const n = parseInt(h.slice(1),16); return `rgba(${n>>16},${(n>>8)&255},${n&255},${a})`; }
+  const CD_BG = 'conic-gradient(from 20deg,#c9ced6,#f1e4ff 8%,#c4efff 16%,#fff3c4 24%,#ffd3e6 32%,#c9ced6 40%,#e9edf1 50%,#c4efff 60%,#f1e4ff 70%,#fff3c4 80%,#c9ced6)';
   function discBg(v){
     if (!v) return 'radial-gradient(circle,#1c1c1c 0 30%,#0b0b0b 31% 100%)';
     const [c1, c2 = c1] = v.colors, a = v.trans ? .78 : 1;
@@ -418,7 +430,8 @@ img{max-width:100%}
   function make(r){
     const it = document.createElement('div'); it.className = 'item'; it.dataset.id = r.id;
     const disc = document.createElement('div'); disc.className = 'disc';
-    const spin = document.createElement('div'); spin.className = 'spin'; spin.style.background = discBg(r.v);
+    const F = fmtOf(r); if (F === 'CD' || F === 'CDr') it.classList.add('cd'); else if (F !== 'Vinyl') it.classList.add('nodisc');
+    const spin = document.createElement('div'); spin.className = 'spin'; spin.style.background = it.classList.contains('cd') ? CD_BG : discBg(r.v);
     const gr = document.createElement('div'); gr.className = 'grooves';
     const lbl = document.createElement('div'); lbl.className = 'lbl';
     if (r.img) lbl.style.backgroundImage = `url("${r.img}")`; else lbl.style.background = '#c33';
@@ -505,6 +518,7 @@ img{max-width:100%}
     $('nArtist').textContent = r.a; $('nTitle').textContent = r.t;
     const sub = $('nSub'); sub.textContent = '';
     const yr = document.createElement('span'); yr.textContent = r.oy ? (r.y ? `${r.oy} · persing ${r.y}` : String(r.oy)) : (r.y || ''); sub.appendChild(yr);
+    if (fmtOf(r) !== 'Vinyl') sub.appendChild(Object.assign(document.createElement('span'), { className: 'ftag', textContent: fmtOf(r).toUpperCase() }));
     if (r.v){ const t = document.createElement('span'); t.className = 'vtag'; const i = document.createElement('i'); i.style.background = discBg(r.v); t.append(i, r.v.name); sub.appendChild(t); }
     $('count').textContent = `${Math.round(pos) + 1} / ${LIST.length}`;
     const L = letterOf(r); document.querySelectorAll('.letters button').forEach(b => b.classList.toggle('on', b.dataset.l === L));
@@ -708,7 +722,9 @@ img{max-width:100%}
     const yrs = ALL.map(r => r.sy).filter(y => y < 9999);
     const oldest = ALL.filter(r => r.sy === Math.min(...yrs))[0];
     const tiles = el('div', 'tiles');
-    [[ALL.length, 'platen'], [Object.keys(artists).length, 'artiesten'], [ALL.filter(r => r.v).length, 'in gekleurd vinyl'], [Math.min(...yrs), 'oudste: ' + (oldest ? oldest.a : '')]]
+    const fcount = {}; ALL.forEach(r => { const f = fmtOf(r); fcount[f] = (fcount[f] || 0) + 1; });
+    const multi = Object.keys(fcount).length > 1;
+    [[ALL.length, multi ? 'items' : 'platen'], [Object.keys(artists).length, 'artiesten'], [ALL.filter(r => r.v).length, 'in gekleurd vinyl'], [Math.min(...yrs), 'oudste: ' + (oldest ? oldest.a : '')]]
       .forEach(([n, l]) => { const t = el('div', 'tile'); t.append(el('b', null, String(n)), el('span', null, l)); tiles.appendChild(t); });
     inn.appendChild(tiles);
 
@@ -738,6 +754,7 @@ img{max-width:100%}
     };
     hbars('Top 10 artiesten', 'Tik op een naam om alleen die platen te zien.', Object.entries(artists).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 10), n => { state.q = n; $('q').value = n; });
     const g = {}; ALL.forEach(r => r.g.forEach(x => g[x] = (g[x] || 0) + 1));
+    if (multi) hbars('Formaten', 'Tik om alleen dat formaat te zien.', Object.entries(fcount).sort((a, b) => b[1] - a[1]), n => { state.format = n; store.set('dv-fmt', n); });
     hbars('Genres', 'Een plaat kan meerdere genres hebben.', Object.entries(g).sort((a, b) => b[1] - a[1]), n => { state.genre = n; });
     const st = {}; ALL.forEach(r => (r.st || []).forEach(x => st[x] = (st[x] || 0) + 1));
     hbars('Top 10 stijlen', null, Object.entries(st).sort((a, b) => b[1] - a[1]).slice(0, 10), n => { state.q = n; $('q').value = n; });
@@ -822,6 +839,15 @@ img{max-width:100%}
     A.append(chip('Alle genres', null, !state.genre, () => { state.genre = null; buildChips(); apply(); }));
     Object.entries(g).sort((a, b) => b[1] - a[1]).forEach(([k, n]) =>
       A.append(chip(k, n, state.genre === k, () => { state.genre = state.genre === k ? null : k; buildChips(); apply(); })));
+    const F = $('chipsF'); F.textContent = '';
+    const fc = {}; ALL.forEach(r => { const f = fmtOf(r); fc[f] = (fc[f] || 0) + 1; });
+    if (state.format && !fc[state.format]){ state.format = null; store.set('dv-fmt', ''); }
+    F.hidden = Object.keys(fc).length < 2;
+    if (!F.hidden){
+      const setF = f => () => { state.format = f; store.set('dv-fmt', f || ''); buildChips(); apply(); };
+      F.append(chip('Alle formaten', null, !state.format, setF(null)));
+      Object.entries(fc).sort((a, b) => b[1] - a[1]).forEach(([k, n]) => F.append(chip(k, n, state.format === k, setF(state.format === k ? null : k))));
+    }
     const nc = ALL.filter(r => r.v).length;
     B.append(chip('Gekleurd vinyl', nc, state.colored, () => { state.colored = !state.colored; buildChips(); apply(); }, 'vin'));
     const d = {}; ALL.forEach(r => { if (r.sy < 9999){ const k = Math.floor(r.sy / 10) * 10; d[k] = (d[k] || 0) + 1; } });

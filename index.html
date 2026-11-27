@@ -1,0 +1,837 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Vinyl Crate</title>
+<meta name="theme-color" content="#0d0b10">
+<meta name="description" content="Blader door je Discogs-platencollectie als een cover flow.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800&family=Inter+Tight:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one-screen app. Top: search + filters. Middle: 3D cover flow on a dark shop floor. Bottom: now-showing caption + A-Z scrubber. */
+:root{
+  --night:#0d0b10;        /* shop at night */
+  --floor:#16131b;        /* surfaces */
+  --ink:#f3eee6;          /* main text, warm paper white */
+  --dim:#9a92a3;          /* secondary text */
+  --line:#2a2531;         /* hairlines */
+  --amber:#ffb547;        /* accent: the shop's neon */
+  --tint:#7a5cff;         /* set per front cover by script */
+  --f-display:"Big Shoulders Display", "Arial Narrow", Impact, sans-serif;
+  --f-body:"Inter Tight", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono:"JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  color-scheme:dark;
+}
+html,body{height:100%}
+[hidden]{display:none!important}
+body{background:var(--night);color:var(--ink);font-family:var(--f-body);overflow:hidden;-webkit-tap-highlight-color:transparent}
+.app{height:100%;display:flex;flex-direction:column;position:relative;isolation:isolate}
+.glow{position:absolute;inset:0;z-index:-1;pointer-events:none;
+  background:radial-gradient(60% 45% at 50% 46%, color-mix(in srgb,var(--tint) 34%,transparent), transparent 70%),
+             linear-gradient(180deg,var(--night) 0%,var(--night) 62%,var(--floor) 100%);
+  transition:background .6s ease}
+@media (prefers-reduced-motion:reduce){.glow{transition:none}}
+
+/* top bar */
+header{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:12px 6px;display:flex;flex-direction:column;gap:10px}
+.bar{display:flex;align-items:center;gap:8px}
+.brand{font-family:var(--f-display);font-weight:800;font-size:clamp(1.3rem,6vw,1.65rem);letter-spacing:.04em;text-transform:uppercase;line-height:1;margin:0;flex:1;min-width:0}
+.brand span{color:var(--amber);text-shadow:0 0 12px color-mix(in srgb,var(--amber) 60%,transparent)}
+.count{font-family:var(--f-mono);font-size:.75rem;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+.iconbtn{appearance:none;border:1px solid var(--line);background:var(--floor);color:var(--ink);width:40px;height:40px;border-radius:50%;display:grid;place-items:center;cursor:pointer;position:relative}
+.iconbtn[aria-expanded="true"]{border-color:var(--amber);color:var(--amber)}
+.iconbtn .dot{position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:var(--amber)}
+.iconbtn:focus-visible,.chip:focus-visible,.letters button:focus-visible,input:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.panel{display:flex;flex-direction:column;gap:10px}
+.search{display:flex;gap:8px}
+.search input{flex:1;min-width:0;font:inherit;font-size:1rem;color:var(--ink);background:var(--floor);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.search input::placeholder{color:var(--dim)}
+.chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+.chips::-webkit-scrollbar{display:none}
+.chip{appearance:none;flex:none;font:500 .8rem var(--f-body);color:var(--dim);background:transparent;border:1px solid var(--line);border-radius:999px;padding:6px 11px;cursor:pointer;white-space:nowrap}
+.chip[aria-pressed="true"]{color:var(--night);background:var(--amber);border-color:var(--amber)}
+.chip.vin[aria-pressed="false"]{color:var(--ink)}
+.chip small{font-family:var(--f-mono);opacity:.7;margin-left:4px}
+
+/* stage */
+.stage{flex:1;min-height:0;position:relative;perspective:1100px;perspective-origin:50% 42%;touch-action:pan-y;user-select:none;-webkit-user-select:none;cursor:grab;overflow:hidden}
+.stage.dragging{cursor:grabbing}
+.item{position:absolute;contain:layout style;left:50%;top:56%;width:var(--S);height:var(--S);margin-left:calc(var(--S) / -2);margin-top:calc(var(--S) / -2);transform-style:preserve-3d;will-change:transform}
+.disc{position:absolute;inset:3%;border-radius:50%;transform:translateY(0) translateZ(-2px);transition:transform .7s cubic-bezier(.2,.8,.2,1);pointer-events:none}
+.item.out .disc{transform:translateY(-46%) translateZ(-2px)}
+.disc .spin{position:absolute;inset:0;border-radius:50%;animation:spin 3.6s linear infinite;animation-play-state:paused}
+.item.out .disc .spin{animation-play-state:running}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.disc .spin{animation:none}.disc{transition:none}}
+.disc .grooves{position:absolute;inset:0;border-radius:50%;background:repeating-radial-gradient(circle at 50% 50%,rgba(0,0,0,.18) 0 1px,rgba(255,255,255,.035) 1px 2.4px);mask:radial-gradient(circle,transparent 0 17%,#000 17.5% 48.5%,transparent 49%);-webkit-mask:radial-gradient(circle,transparent 0 17%,#000 17.5% 48.5%,transparent 49%)}
+.disc .lbl{position:absolute;inset:32%;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 2px rgba(0,0,0,.35)}
+.disc .lbl::after{content:"";position:absolute;inset:44%;border-radius:50%;background:var(--night)}
+.disc .sheen{position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 20deg,transparent 0 8%,rgba(255,255,255,.16) 12%,transparent 18% 50%,rgba(255,255,255,.12) 58%,transparent 64%);pointer-events:none}
+.flip{position:absolute;inset:0;transform-style:preserve-3d;transition:transform .3s cubic-bezier(.3,.7,.2,1)}
+.item.turn .flip{transform:rotateY(90deg);transition:transform .22s ease-in}
+@media (prefers-reduced-motion:reduce){.flip{transition:none}}
+.face{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;border-radius:3px;overflow:hidden}
+.front{background:var(--floor);box-shadow:0 18px 36px -16px rgba(0,0,0,.9)}
+.halo{position:absolute;inset:-6%;border-radius:12px;background:var(--tint);filter:blur(34px);opacity:0;transition:opacity .5s ease;transform:translateZ(-4px);pointer-events:none}
+.item.lit .halo{opacity:.55}
+.item:not(.center) .disc{display:none}
+.stage .item{transition-property:transform,opacity}
+.front img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+.front .ph{position:absolute;inset:0;display:flex;align-items:flex-end;padding:12px;font-family:var(--f-display);font-weight:800;font-size:1.3rem;line-height:1;text-transform:uppercase;background:linear-gradient(135deg,var(--line),var(--floor))}
+.shade{position:absolute;inset:0;background:#000;pointer-events:none;opacity:0}
+.back{transform:rotateY(180deg);background:#efe9dd;color:#1b1714;display:flex;flex-direction:column;padding:14px 14px 10px;gap:6px;box-shadow:0 24px 50px -18px #000}
+.card h2{font-family:var(--f-display);font-weight:800;font-size:2rem;line-height:1;margin:0;text-transform:uppercase;text-wrap:balance}
+.card .by{font-size:1.05rem;font-weight:600;margin:0}
+.card .meta{font-family:var(--f-mono);font-size:.78rem;line-height:1.45;color:#5d554c;margin:0}
+.card .meta b{color:#1b1714;font-weight:500}
+.card ol{list-style:none;margin:4px 0 0;padding:8px 0 0;border-top:1px solid #cfc6b6;font-size:1rem;line-height:1.3}
+.card li{display:grid;grid-template-columns:2.4em 1fr auto;gap:8px;padding:6px 0;border-bottom:1px dotted #d6cdbd}
+.card li .p{font-family:var(--f-mono);font-size:.8rem;color:#8a8075;padding-top:1px}
+.card li .d{font-family:var(--f-mono);font-size:.8rem;color:#8a8075;font-variant-numeric:tabular-nums}
+.card li.h{display:block;font-weight:600;padding-top:12px;border-bottom:0;text-transform:uppercase;font-size:.78rem;letter-spacing:.06em;color:#5d554c}
+.card a{font-size:.95rem;margin-top:8px;font-weight:600;color:#a4570a;text-decoration:none;align-self:flex-start}
+.sheet{position:absolute;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:16px;background:rgba(8,6,10,.78);perspective:1200px}
+.card{background:#efe9dd;color:#1b1714;width:100%;max-width:540px;max-height:100%;overflow-y:auto;overscroll-behavior:contain;border-radius:4px;padding:22px 20px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 0 80px -10px color-mix(in srgb,var(--tint) 60%,transparent),0 30px 60px -20px #000;animation:cardIn .4s cubic-bezier(.2,.8,.2,1)}
+.sheet.closing .card{animation:cardOut .2s ease-in forwards}
+@keyframes cardIn{from{transform:rotateY(-90deg) scale(.7);opacity:.5}to{transform:none;opacity:1}}
+@keyframes cardOut{to{transform:rotateY(90deg) scale(.7);opacity:.5}}
+@media (prefers-reduced-motion:reduce){.card,.sheet.closing .card{animation:none}}
+.card .close{font-size:.75rem;color:#8a8075;text-align:center;margin:6px 0 0}
+.empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:var(--dim);padding:24px}
+
+/* caption + scrubber */
+footer{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:4px 14px;display:flex;flex-direction:column;gap:12px}
+.now{text-align:center;min-height:5.2em;display:flex;flex-direction:column;align-items:center;gap:3px}
+.now .artist{font-family:var(--f-display);font-weight:800;font-size:clamp(1.6rem,7vw,2.3rem);line-height:.95;text-transform:uppercase;letter-spacing:.02em;text-wrap:balance;margin:0}
+.now .title{font-size:.98rem;color:var(--ink);opacity:.9;margin:0;text-wrap:balance}
+.now .sub{font-family:var(--f-mono);font-size:.72rem;color:var(--dim);display:flex;gap:10px;flex-wrap:wrap;justify-content:center;align-items:center}
+.vtag{display:inline-flex;align-items:center;gap:6px;color:var(--ink)}
+.vtag i{width:11px;height:11px;border-radius:50%;display:inline-block;box-shadow:0 0 0 1px rgba(255,255,255,.25)}
+.actions{display:flex;justify-content:center}
+.roll{appearance:none;display:inline-flex;align-items:center;gap:8px;font:600 .9rem var(--f-body);color:var(--night);background:var(--amber);border:0;border-radius:999px;padding:10px 18px;cursor:pointer;box-shadow:0 0 24px -4px color-mix(in srgb,var(--amber) 70%,transparent)}
+.roll:disabled{opacity:.5}
+.roll:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.roll.ghost{background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none}
+.actions{gap:8px;flex-wrap:wrap}
+.stats{position:absolute;inset:0;z-index:60;background:var(--night);overflow-y:auto;overscroll-behavior:contain;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:16px 28px;animation:statsIn .3s ease-out}
+@keyframes statsIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.stats{animation:none}}
+.stats .in{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+.stats .top{display:flex;align-items:center;gap:12px}
+.stats .top h2{font-family:var(--f-display);font-weight:800;font-size:1.8rem;text-transform:uppercase;letter-spacing:.03em;margin:0;flex:1}
+.tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.tile{background:var(--floor);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:2px}
+.tile b{font-family:var(--f-display);font-weight:800;font-size:2.1rem;line-height:1;font-variant-numeric:tabular-nums}
+.tile span{font-size:.78rem;color:var(--dim)}
+.sec{display:flex;flex-direction:column;gap:10px}
+.sec h3{font-size:.72rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin:0}
+.sec .note{font-size:.72rem;color:var(--dim);margin:0}
+.cols{display:flex;align-items:flex-end;gap:6px;height:150px;border-bottom:1px solid var(--line)}
+.col{flex:1;min-width:0;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;appearance:none;background:none;border:0;padding:0;color:var(--ink);cursor:pointer}
+.col .v{font-family:var(--f-mono);font-size:.68rem;font-variant-numeric:tabular-nums}
+.col .bar{width:100%;max-width:44px;background:var(--amber);border-radius:4px 4px 0 0;min-height:2px}
+.col:hover .bar,.col:focus-visible .bar{filter:brightness(1.15)}
+.xl{display:flex;gap:6px;margin-top:-4px}
+.xl span{flex:1;min-width:0;text-align:center;font-family:var(--f-mono);font-size:.66rem;color:var(--dim)}
+.rows{display:flex;flex-direction:column;gap:6px}
+.hrow{display:grid;grid-template-columns:minmax(0,9.5em) 1fr 2.4em;gap:10px;align-items:center;appearance:none;background:none;border:0;padding:3px 0;color:var(--ink);font:inherit;text-align:left;cursor:pointer}
+.hrow .n{font-size:.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hrow .track{height:12px}
+.hrow .bar{height:100%;background:var(--amber);border-radius:0 4px 4px 0;min-width:2px}
+.hrow .v{font-family:var(--f-mono);font-size:.75rem;text-align:right;font-variant-numeric:tabular-nums;color:var(--dim)}
+.hrow:hover .bar,.hrow:focus-visible .bar{filter:brightness(1.15)}
+.swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:10px}
+.sw{appearance:none;border:0;background:none;padding:0;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--dim);font-size:.6rem;text-align:center;line-height:1.2}
+.sw i{width:48px;height:48px;border-radius:50%;display:block;position:relative;box-shadow:0 0 0 1px rgba(255,255,255,.12)}
+.sw i::after{content:"";position:absolute;inset:36%;border-radius:50%;background:var(--night)}
+.sw span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;width:100%}
+.stats button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.spot{display:flex;flex-direction:column;gap:8px;margin-top:10px;padding-top:12px;border-top:1px solid #cfc6b6}
+.spot .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.sbtn{appearance:none;display:inline-flex;align-items:center;gap:7px;font:600 .9rem var(--f-body);border-radius:999px;padding:9px 14px;cursor:pointer;border:1px solid #1b1714;background:#1b1714;color:#efe9dd;text-decoration:none}
+.sbtn.ghost{background:transparent;color:#1b1714}
+.sbtn:disabled{opacity:.55;cursor:default}
+.sbtn:focus-visible{outline:2px solid #a4570a;outline-offset:2px}
+.spot .msg{font-size:.8rem;color:#5d554c;margin:0}
+.spot .found{font-size:.8rem;color:#5d554c;margin:0}
+.letters{display:flex;justify-content:space-between;gap:0;touch-action:none;border-top:1px solid var(--line);padding-top:8px;position:relative}
+.letters button{appearance:none;background:none;border:0;color:var(--dim);font:500 .7rem var(--f-mono);padding:6px 0;flex:1;min-width:0;cursor:pointer}
+.letters button.on{color:var(--amber)}
+.letters button:disabled{opacity:.25}
+.bubble{position:absolute;bottom:44px;width:56px;height:56px;margin-left:-28px;border-radius:12px;background:var(--amber);color:var(--night);font:800 2rem var(--f-display);display:grid;place-items:center;pointer-events:none}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;font-size:14px}
+img{max-width:100%}
+.app{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+.brand .plain{color:inherit;text-shadow:none}
+.setup .in{gap:16px}
+.setup p{margin:0;line-height:1.5;color:var(--dim);font-size:.9rem}
+.setup p b{color:var(--ink)}
+.setup label{display:flex;flex-direction:column;gap:6px;font-size:.8rem;font-weight:600;letter-spacing:.04em;color:var(--ink)}
+.setup input{font:inherit;font-size:1rem;font-weight:400;letter-spacing:0;color:var(--ink);background:var(--floor);border:1px solid var(--line);border-radius:10px;padding:12px}
+.setup input:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.setup a{color:var(--amber)}
+.setup .err{color:#ff8a7a;font-size:.9rem;margin:0}
+.setup .row{display:flex;gap:8px;flex-wrap:wrap}
+.card a.sbtn{color:#efe9dd;font-size:.9rem;margin-top:0}
+.credit{font-size:.7rem;color:var(--dim);text-align:center;margin:8px 0 0}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <div class="glow" id="glow"></div>
+  <header>
+    <div class="bar">
+      <h1 class="brand"><span class="plain" id="who">Mijn</span> <span>Vinyl</span></h1>
+      <span class="count" id="count">…</span>
+      <button class="iconbtn" id="snd" aria-pressed="true" aria-label="Geluid aan of uit">
+        <svg id="sndOn" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/><path d="M19 6a8.5 8.5 0 0 1 0 12"/></svg>
+        <svg id="sndOff" hidden width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M17 9l5 6M22 9l-5 6"/></svg>
+      </button>
+      <button class="iconbtn" id="toggle" aria-expanded="false" aria-controls="panel" aria-label="Zoeken en filteren">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+        <span class="dot" id="fdot" hidden></span>
+      </button>
+    </div>
+    <div class="panel" id="panel" hidden>
+      <div class="search"><input id="q" type="search" placeholder="Artiest, titel, label of stijl" autocomplete="off" enterkeyhint="search"></div>
+      <div class="chips" id="chipsA" role="group" aria-label="Genre"></div>
+      <div class="chips" id="chipsB" role="group" aria-label="Decennium en vinyl"></div>
+    </div>
+  </header>
+
+  <div class="stage" id="stage" aria-label="Platencollectie, swipe om te bladeren"></div>
+
+  <footer>
+    <div class="now" aria-live="polite">
+      <p class="artist" id="nArtist">Platen laden</p>
+      <p class="title" id="nTitle"></p>
+      <div class="sub" id="nSub"></div>
+    </div>
+    <div class="actions"><button class="roll" id="roll"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><circle cx="16" cy="16" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="16" cy="8" r="1.4" fill="currentColor"/><circle cx="8" cy="16" r="1.4" fill="currentColor"/></svg>Wat draai ik vanavond?</button><button class="roll ghost" id="statsBtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 20V11M12 20V5M19 20v-6"/></svg>Statistieken</button></div>
+    <div class="letters" id="letters"></div>
+  </footer>
+  <div class="stats" id="stats" hidden role="dialog" aria-label="Statistieken"></div>
+  <div class="stats setup" id="setup" hidden role="dialog" aria-label="Account"></div>
+  <div class="sheet" id="sheet" hidden><div class="card" id="card" role="dialog" aria-label="Tracklist"></div></div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const stage = $('stage');
+  let ALL = [], LIST = [], els = new Map();
+  let rolling = false;
+  let pos = 0, target = 0, vel = 0, anim = null, settledTimer = null, flippedId = null;
+  const state = { q: '', genre: null, decade: null, colored: false };
+  const store = {
+    get(k){ try { return localStorage.getItem(k); } catch(e){ return null; } },
+    set(k,v){ try { localStorage.setItem(k,v); } catch(e){} }
+  };
+
+  // ---------- data ----------
+  const API = 'https://api.discogs.com';
+  let acct = null; try { acct = JSON.parse(store.get('dv-acct') || 'null'); } catch(e){}
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let nextSlot = 0;
+  async function api(path){
+    const gap = acct && acct.token ? 1100 : 2500;          // Discogs: 25/min anonymous, 60/min with a token
+    const now = Date.now(), at = Math.max(now, nextSlot); nextSlot = at + gap;
+    if (at > now) await sleep(at - now);
+    for (let i = 0; i < 3; i++){
+      let res;
+      try { res = await fetch(API + path, { headers: acct && acct.token ? { Authorization: 'Discogs token=' + acct.token } : {} }); }
+      catch(e){ const er = new Error('net'); er.status = 0; throw er; }
+      if (res.status === 429){ await sleep(60000); continue; }
+      if (!res.ok){ const er = new Error('http'); er.status = res.status; throw er; }
+      return res.json();
+    }
+    const er = new Error('rate'); er.status = 429; throw er;
+  }
+
+  const COLORS = [['astronomical blue','#3a56d4'],['ice blue','#a8dcf2'],['sky blue','#7fc4ea'],['apple green','#8cc63f'],['neon green','#47ff3a'],['coke bottle','#9fd6c0'],['cola','#5b2a17'],['cherry','#b0102b'],['fuchsia','#e0198a'],['magenta','#ff1fa8'],['gold','#d6ad3c'],['silver','#c4c8cc'],['crystal clear','#e8eef2'],['clear','#e8eef2'],['blue','#2f6ad6'],['red','#c8162e'],['green','#2f9e4f'],['orange','#f27a1a'],['purple','#7b3fa0'],['pink','#f48fb1'],['white','#f1efe9'],['yellow','#f5d000'],['grey','#8d8f93'],['gray','#8d8f93'],['brown','#7a4a26'],['black','#141414']];
+  function vinyl(texts){
+    for (const t of texts){
+      if (!t || (/label|cover|sleeve/i.test(t) && !/vinyl/i.test(t))) continue;
+      let low = t.toLowerCase(); const found = [];
+      for (const [name, hex] of COLORS){ const i = low.indexOf(name); if (i >= 0){ found.push([i, hex]); low = low.slice(0, i) + ' '.repeat(name.length) + low.slice(i + name.length); } }
+      if (!found.length) continue;
+      found.sort((a, b) => a[0] - b[0]);
+      const cols = found.map(f => f[1]);
+      if (cols.length === 1 && cols[0] === '#141414') continue;
+      const l = t.toLowerCase();
+      const style = /marble/.test(l) ? 'marble' : /swirl|smoke|vortex/.test(l) ? 'swirl' : /splatter/.test(l) ? 'splatter' : 'solid';
+      return { name: t.split(',')[0].trim(), colors: cols.slice(0, 2), style, trans: /translucent|transparent|clear|coke bottle/.test(l) };
+    }
+    return null;
+  }
+  const GLOWS = ['#7a5cff', '#ff7a45', '#2ec4b6', '#e84a5f', '#f6ae2d', '#4d9de0', '#9b5de5', '#43aa8b'];
+  const clean = n => n.replace(/\s*\(\d+\)$/, '');
+  function toRec(it){
+    const b = it.basic_information, fm = b.formats || [], texts = fm.map(f => f.text || '');
+    const a = (b.artists || []).map(x => clean(x.anv || x.name) + (x.join && x.join !== ',' ? ' ' + x.join + ' ' : x.join === ',' ? ', ' : '')).join('').trim();
+    const v = vinyl(texts), lab = (b.labels || [])[0] || {};
+    return { id: b.id, mid: b.master_id || 0, a, s: clean((b.artists || [{ name: '' }])[0].name).replace(/^(the|de)\s+/i, '').toLowerCase(),
+      t: b.title, y: b.year || null, l: lab.name || '', c: lab.catno || '', g: b.genres || [], st: b.styles || [],
+      f: texts.filter(Boolean).join(', '), v, img: /^https:\/\//.test(b.cover_image || '') && !/spacer\.gif/.test(b.cover_image) ? b.cover_image : '',
+      tint: v ? v.colors[0] : GLOWS[b.id % GLOWS.length], u: 'https://www.discogs.com/release/' + b.id, add: (it.date_added || '').slice(0, 10) };
+  }
+  const detKey = id => 'dv-d-' + id;
+  const getDet = id => { try { return JSON.parse(store.get(detKey(id)) || 'null'); } catch(e){ return null; } };
+  function finish(r){
+    const d = getDet(r.id);
+    if (d){ r.oy = d.oy && d.oy !== r.y ? d.oy : null; r.tl = d.tl; r.co = d.co; }
+    r.sy = r.oy || r.y || 9999;
+    r.hay = [r.a, r.t, r.l, r.c, ...r.st, ...((r.tl || []).map(t => t.t))].join(' ').toLowerCase();
+    return r;
+  }
+  function useRecords(recs, keepPos){
+    ALL = recs.map(finish);
+    ALL.sort((a, b) => a.s.localeCompare(b.s, 'nl') || a.sy - b.sy || a.t.localeCompare(b.t, 'nl'));
+    buildChips(); apply(true);
+  }
+  let urgent = 0;
+  async function loadDetails(r, onTracks){
+    let d = getDet(r.id);
+    if (d) return d;
+    const rel = await api('/releases/' + r.id);
+    d = { tl: (rel.tracklist || []).filter(t => t.type_ === 'track' || t.type_ === 'heading').map(t => ({ p: t.position || '', t: t.title, d: t.duration || '' })), co: rel.country || '', oy: null };
+    if (onTracks) onTracks(d);
+    if (r.mid){ try { const m = await api('/masters/' + r.mid); d.oy = m.year || null; } catch(e){} }
+    store.set(detKey(r.id), JSON.stringify(d));
+    return d;
+  }
+  let bgRun = 0;
+  async function background(){
+    const run = ++bgRun;
+    for (const r of ALL.slice()){
+      if (run !== bgRun) return;
+      if (getDet(r.id)) continue;
+      while (urgent > 0) await sleep(1500);
+      try { await loadDetails(r); } catch(e){ if (e.status === 429 || e.status === 0) await sleep(30000); }
+    }
+  }
+  function status(t, sub){ $('nArtist').textContent = t; $('nTitle').textContent = sub || ''; $('nSub').textContent = ''; }
+  async function loadCollection(force){
+    if (!acct || !acct.user) { openSetup(); return; }
+    $('who').textContent = acct.user;
+    const key = 'dv-col-' + acct.user.toLowerCase();
+    let cached = null; try { cached = JSON.parse(store.get(key) || 'null'); } catch(e){}
+    if (cached && cached.recs){ useRecords(cached.recs); background(); if (!force && Date.now() - cached.at < 6 * 3600e3) return; }
+    else status('Platen laden', 'Je collectie wordt opgehaald bij Discogs…');
+    try {
+      let page = 1, pages = 1; const recs = [];
+      do {
+        const d = await api(`/users/${encodeURIComponent(acct.user)}/collection/folders/0/releases?per_page=100&page=${page}`);
+        pages = d.pagination ? d.pagination.pages : 1;
+        (d.releases || []).forEach(it => recs.push(toRec(it)));
+        if (!cached) status('Platen laden', `${recs.length} van ${d.pagination ? d.pagination.items : recs.length} platen opgehaald…`);
+        page++;
+      } while (page <= pages);
+      store.set(key, JSON.stringify({ at: Date.now(), recs }));
+      const changed = !cached || cached.recs.length !== recs.length || cached.recs.some((r, i) => r.id !== recs[i].id);
+      if (changed){ useRecords(recs); background(); }
+      if (!recs.length) status('Nog geen platen', 'Voeg platen toe aan je Discogs-collectie en vernieuw.');
+    } catch(e){
+      if (cached) return;
+      const msg = e.status === 404 ? 'Deze gebruikersnaam bestaat niet op Discogs.' : (e.status === 401 || e.status === 403) ? 'Deze collectie is privé. Vul een persoonlijke sleutel in.' : e.status === 0 ? 'Geen verbinding met Discogs. Controleer je internet.' : 'Discogs reageert niet. Probeer het straks opnieuw.';
+      openSetup(msg);
+    }
+  }
+
+  // ---------- account ----------
+  function openSetup(err){
+    const box = $('setup'); box.textContent = '';
+    const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+    const inn = el('div', 'in'); box.appendChild(inn);
+    const top = el('div', 'top'); top.appendChild(el('h2', null, acct ? 'Account' : 'Welkom'));
+    if (acct && ALL.length){ const x = el('button', 'iconbtn'); x.setAttribute('aria-label', 'Sluiten'); x.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>'; x.addEventListener('click', () => { box.hidden = true; }); top.appendChild(x); }
+    inn.appendChild(top);
+    const intro = el('p'); intro.append('Koppel je ', el('b', null, 'Discogs'), '-collectie. De app haalt je platen en hoezen zelf op en onthoudt ze op deze telefoon.'); inn.appendChild(intro);
+    const form = document.createElement('form'); form.className = 'in'; form.style.gap = '14px';
+    const l1 = el('label', null, 'Discogs-gebruikersnaam'); const u = document.createElement('input'); u.id = 'su'; u.autocomplete = 'username'; u.autocapitalize = 'none'; u.spellcheck = false; u.required = true; u.value = acct ? acct.user : ''; l1.appendChild(u);
+    const l2 = el('label', null, 'Persoonlijke sleutel (enkel nodig als je collectie privé is)'); const k = document.createElement('input'); k.id = 'sk'; k.type = 'password'; k.autocomplete = 'off'; k.value = acct && acct.token || ''; l2.appendChild(k);
+    const help = el('p'); const link = el('a', null, 'Discogs-instellingen, Developers'); link.href = 'https://www.discogs.com/settings/developers'; link.target = '_blank'; link.rel = 'noopener';
+    help.append('Een sleutel maak je aan via ', link, ' en dan "Generate new token". Hij blijft alleen op deze telefoon.');
+    form.append(l1, l2, help);
+    if (err) form.appendChild(el('p', 'err', err));
+    const row = el('div', 'row'); const go = el('button', 'roll', 'Opslaan en laden'); go.type = 'submit'; row.appendChild(go);
+    if (acct && ALL.length){
+      const rf = el('button', 'roll ghost', 'Collectie vernieuwen'); rf.type = 'button';
+      rf.addEventListener('click', () => { box.hidden = true; loadCollection(true); }); row.appendChild(rf);
+    }
+    form.appendChild(row);
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const user = u.value.trim(); if (!user) return;
+      const changedUser = !acct || acct.user.toLowerCase() !== user.toLowerCase();
+      acct = { user, token: k.value.trim() }; store.set('dv-acct', JSON.stringify(acct));
+      box.hidden = true;
+      if (changedUser){ bgRun++; ALL = []; LIST = []; stage.textContent = ''; els.clear(); try { localStorage.removeItem('dv-last'); } catch(e){} }
+      loadCollection(true);
+    });
+    inn.appendChild(form);
+    inn.appendChild(el('p', 'credit', 'Gegevens en hoezen van Discogs. Deze app is niet van Discogs.'));
+    box.hidden = false;
+  }
+  loadCollection(false);
+
+  function apply(initial){
+    const q = state.q.trim().toLowerCase();
+    LIST = ALL.filter(r =>
+      (!q || q.split(/\s+/).every(w => r.hay.includes(w))) &&
+      (!state.genre || r.g.includes(state.genre)) &&
+      (!state.decade || (Math.floor(r.sy/10)*10) === state.decade) &&
+      (!state.colored || r.v));
+    $('fdot').hidden = !(q || state.genre || state.decade || state.colored);
+    stage.textContent = ''; els.clear(); flippedId = null;
+    if (!LIST.length){
+      const e = document.createElement('div'); e.className = 'empty';
+      e.textContent = 'Geen platen gevonden met deze zoekopdracht of filters.';
+      stage.appendChild(e);
+    }
+    let start = 0;
+    if (initial){ const last = +store.get('dv-last'); const i = LIST.findIndex(r => r.id === last); if (i >= 0) start = i; }
+    pos = target = start; vel = 0;
+    buildLetters();
+    layout(); render(); settle();
+  }
+
+  // ---------- disc look ----------
+  function hexA(h, a){ const n = parseInt(h.slice(1),16); return `rgba(${n>>16},${(n>>8)&255},${n&255},${a})`; }
+  function discBg(v){
+    if (!v) return 'radial-gradient(circle,#1c1c1c 0 30%,#0b0b0b 31% 100%)';
+    const [c1, c2 = c1] = v.colors, a = v.trans ? .78 : 1;
+    const A = hexA(c1, a), B = hexA(c2, a);
+    if (v.style === 'marble') return `radial-gradient(circle at 30% 35%,${B} 0 9%,transparent 22%),radial-gradient(circle at 70% 62%,${B} 0 7%,transparent 20%),conic-gradient(from 40deg,${A},${B} 12%,${A} 25%,${A} 40%,${B} 52%,${A} 66%,${B} 80%,${A})`;
+    if (v.style === 'swirl') return `repeating-conic-gradient(from 0deg,${A} 0 9deg,${B} 18deg,${A} 27deg)`;
+    if (v.style === 'splatter') return `radial-gradient(circle at 25% 30%,${B} 0 3%,transparent 3.5%),radial-gradient(circle at 68% 22%,${B} 0 2%,transparent 2.5%),radial-gradient(circle at 60% 75%,${B} 0 4%,transparent 4.5%),${A}`;
+    return v.trans ? `radial-gradient(circle at 40% 35%,${hexA(c1,.55)},${A} 70%)` : A;
+  }
+
+  // ---------- elements ----------
+  function make(r){
+    const it = document.createElement('div'); it.className = 'item'; it.dataset.id = r.id;
+    const disc = document.createElement('div'); disc.className = 'disc';
+    const spin = document.createElement('div'); spin.className = 'spin'; spin.style.background = discBg(r.v);
+    const gr = document.createElement('div'); gr.className = 'grooves';
+    const lbl = document.createElement('div'); lbl.className = 'lbl';
+    if (r.img) lbl.style.backgroundImage = `url("${r.img}")`; else lbl.style.background = '#c33';
+    spin.append(gr, lbl);
+    const sh = document.createElement('div'); sh.className = 'sheen';
+    disc.append(spin, sh);
+    const flip = document.createElement('div'); flip.className = 'flip';
+    const front = document.createElement('div'); front.className = 'face front';
+    if (r.img){ const im = new Image(); im.alt = `${r.a} – ${r.t}`; im.decoding = 'async'; im.draggable = false; im.src = r.img; front.appendChild(im); }
+    else { const ph = document.createElement('div'); ph.className = 'ph'; ph.textContent = r.t; front.appendChild(ph); }
+    const shade = document.createElement('div'); shade.className = 'shade'; front.appendChild(shade);
+    const back = document.createElement('div'); back.className = 'face back';
+    flip.append(front, back);
+    const halo = document.createElement('div'); halo.className = 'halo'; halo.style.background = r.tint;
+    it.append(halo, disc, flip);
+    it._shade = shade; it._back = back; it._r = r;
+    return it;
+  }
+  function fillCard(r){
+    const b = $('card'); b.textContent = ''; b.scrollTop = 0; b.dataset.id = String(r.id);
+    const h = document.createElement('h2'); h.textContent = r.t;
+    const by = document.createElement('p'); by.className = 'by'; by.textContent = r.a;
+    const meta = document.createElement('p'); meta.className = 'meta';
+    const add = (k, v) => { if (!v) return; const s = document.createElement('span'); s.append(k + ' '); const bb = document.createElement('b'); bb.textContent = v; s.append(bb); meta.append(s, document.createElement('br')); };
+    add('Jaar', r.oy ? (r.y ? `${r.oy} (deze persing ${r.y})` : String(r.oy)) : (r.y || '–'));
+    add('Editie', [r.f, r.co].filter(Boolean).join(' · '));
+    const ol = document.createElement('ol');
+    const fillOl = list => { ol.textContent = ''; (list || []).forEach(t => {
+      const li = document.createElement('li');
+      if (!t.p && !t.d){ li.className = 'h'; li.textContent = t.t; }
+      else { const p = document.createElement('span'); p.className = 'p'; p.textContent = t.p; const n = document.createElement('span'); n.textContent = t.t; const d = document.createElement('span'); d.className = 'd'; d.textContent = t.d; li.append(p, n, d); }
+      ol.appendChild(li);
+    });
+    if (!(list || []).length){ const li = document.createElement('li'); li.className = 'h'; li.textContent = 'Geen tracklist op Discogs'; ol.appendChild(li); } };
+    if (r.tl) fillOl(r.tl);
+    else {
+      const li = document.createElement('li'); li.className = 'h'; li.textContent = 'Tracklist laden…'; ol.appendChild(li);
+      urgent++;
+      const show = d => { if ($('card').dataset.id === String(r.id)) fillOl(d.tl); };
+      loadDetails(r, show).then(d => {
+        urgent--;
+        finish(r); if ($('card').dataset.id !== String(r.id)) return;
+        fillOl(r.tl); meta.textContent = '';
+        add('Jaar', r.oy ? (r.y ? `${r.oy} (deze persing ${r.y})` : String(r.oy)) : (r.y || '–'));
+        add('Editie', [r.f, r.co].filter(Boolean).join(' · '));
+      }).catch(() => { urgent--; if ($('card').dataset.id === String(r.id)){ li.textContent = 'Tracklist kon niet geladen worden. Probeer straks opnieuw.'; } });
+    }
+    const a = document.createElement('a'); a.href = r.u.startsWith('https://') ? r.u : 'https://www.discogs.com/release/' + r.id; a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'Bekijk op Discogs ↗';
+    const c = document.createElement('p'); c.className = 'close'; c.textContent = 'Tik ergens om terug te gaan';
+    b.append(h, by, meta, ol, spotBlock(r), a, c);
+  }
+
+  // ---------- layout ----------
+  let S = 280;
+  function layout(){
+    const w = stage.clientWidth, h = stage.clientHeight;
+    S = Math.round(Math.max(150, Math.min(w * 0.64, h * 0.5, 360)));
+    stage.style.setProperty('--S', S + 'px');
+  }
+  window.addEventListener('resize', () => { layout(); render(); });
+
+  const RANGE = 6;
+  function render(){
+    if (!LIST.length) return;
+    const lo = Math.max(0, Math.floor(pos) - RANGE), hi = Math.min(LIST.length - 1, Math.ceil(pos) + RANGE);
+    for (const [i, el] of els){ if (i < lo || i > hi){ el.remove(); els.delete(i); } }
+    for (let i = lo; i <= hi; i++){
+      let el = els.get(i);
+      if (!el){ el = make(LIST[i]); els.set(i, el); stage.appendChild(el); }
+      const d = i - pos, ad = Math.abs(d), sg = Math.sign(d), c = Math.min(ad, 1);
+      const x = ad <= 1 ? d * S * 0.62 : sg * (S * 0.62 + (ad - 1) * S * 0.24);
+      const z = -c * S * 0.5 - Math.max(ad - 1, 0) * 14;
+      const ry = -sg * c * 64;
+      el.style.transform = `translateX(${x.toFixed(1)}px) translateZ(${z.toFixed(1)}px) rotateY(${ry.toFixed(2)}deg)`;
+      el.style.zIndex = String(1000 - Math.round(ad * 10));
+      el._shade.style.opacity = (Math.min(ad, 4) * 0.13).toFixed(3);
+      el.classList.toggle('center', ad < 0.5);
+    }
+    const ci = Math.round(pos);
+    const r = LIST[ci];
+    if (r && r !== render._last){ render._last = r; caption(r); if (rolling) sfx.tick(); }
+  }
+  function caption(r){
+    $('nArtist').textContent = r.a; $('nTitle').textContent = r.t;
+    const sub = $('nSub'); sub.textContent = '';
+    const yr = document.createElement('span'); yr.textContent = r.oy ? (r.y ? `${r.oy} · persing ${r.y}` : String(r.oy)) : (r.y || ''); sub.appendChild(yr);
+    if (r.v){ const t = document.createElement('span'); t.className = 'vtag'; const i = document.createElement('i'); i.style.background = discBg(r.v); t.append(i, r.v.name); sub.appendChild(t); }
+    $('count').textContent = `${Math.round(pos) + 1} / ${LIST.length}`;
+    const L = letterOf(r); document.querySelectorAll('.letters button').forEach(b => b.classList.toggle('on', b.dataset.l === L));
+  }
+
+  // ---------- motion ----------
+  function clamp(v){ return Math.max(0, Math.min(LIST.length - 1, v)); }
+  function unsettle(){
+    clearTimeout(settledTimer);
+    els.forEach(el => el.classList.remove('out', 'lit'));
+    if (flippedId !== null) closeFlip();
+  }
+  function settle(){
+    clearTimeout(settledTimer);
+    settledTimer = setTimeout(() => {
+      const i = Math.round(pos), el = els.get(i);
+      if (el && Math.abs(pos - i) < 0.01 && flippedId === null){ el.classList.add('out', 'lit'); sfx.slide(); }
+      if (LIST[i]) document.documentElement.style.setProperty('--tint', LIST[i].tint || '#7a5cff');
+      if (LIST[i]) store.set('dv-last', String(LIST[i].id));
+    }, 380);
+  }
+  function animateTo(t){
+    target = clamp(Math.round(t));
+    if (anim) cancelAnimationFrame(anim);
+    unsettle();
+    const step = () => {
+      const diff = target - pos;
+      if (Math.abs(diff) < 0.002){ pos = target; render(); anim = null; settle(); return; }
+      pos += diff * 0.16; render(); anim = requestAnimationFrame(step);
+    };
+    anim = requestAnimationFrame(step);
+  }
+
+  // drag + momentum
+  let drag = null;
+  stage.addEventListener('pointerdown', e => {
+    if (!LIST.length || e.button > 0) return;
+    if (anim) cancelAnimationFrame(anim), anim = null;
+    drag = { x: e.clientX, y: e.clientY, p: pos, t: performance.now(), lx: e.clientX, lt: performance.now(), v: 0, moved: false, target: e.target.closest('.item') };
+    stage.setPointerCapture(e.pointerId);
+  });
+  stage.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x;
+    if (flippedId !== null) return;
+    if (!drag.moved && Math.abs(dx) > 6){ drag.moved = true; stage.classList.add('dragging'); unsettle(); }
+    if (!drag.moved) return;
+    const now = performance.now(), dt = Math.max(1, now - drag.lt);
+    drag.v = 0.8 * ((e.clientX - drag.lx) / dt) + 0.2 * drag.v; drag.lx = e.clientX; drag.lt = now;
+    let p = drag.p - dx / (S * 0.42);
+    if (p < 0) p = p * 0.35; if (p > LIST.length - 1) p = LIST.length - 1 + (p - LIST.length + 1) * 0.35;
+    pos = p; render();
+  });
+  const end = e => {
+    if (!drag) return;
+    stage.classList.remove('dragging');
+    const d = drag; drag = null;
+    if (!d.moved){ tap(d.target); return; }
+    const fling = -d.v * 1000 / (S * 0.42) * 0.28; // records per second -> extra travel
+    animateTo(pos + Math.max(-30, Math.min(30, fling)));
+  };
+  stage.addEventListener('pointerup', end);
+  stage.addEventListener('pointercancel', end);
+
+  function closeFlip(){
+    if (flippedId === null) return;
+    const el = els.get(flippedId), sh = $('sheet');
+    flippedId = null; sh.classList.add('closing');
+    setTimeout(() => { sh.hidden = true; sh.classList.remove('closing'); if (el) el.classList.remove('turn'); settle(); }, 200);
+  }
+  $('sheet').addEventListener('click', e => { if (!e.target.closest('a,button,.spot')) closeFlip(); });
+  window.addEventListener('keydown', e => { if (e.key === 'Escape') closeFlip(); });
+  function tap(item){
+    if (flippedId !== null){ closeFlip(); return; }
+    if (!item) return;
+    const i = [...els].find(([, el]) => el === item)?.[0];
+    if (i === undefined) return;
+    if (i !== Math.round(pos)){ animateTo(i); return; }
+    item.classList.remove('out');
+    item.classList.add('turn');
+    flippedId = i;
+    fillCard(LIST[i]);
+    sfx.drop();
+    setTimeout(() => { if (flippedId === i) $('sheet').hidden = false; }, 200);
+  }
+
+  // keyboard + wheel
+  window.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT') return;
+    if (e.key === 'ArrowRight') animateTo(target + 1);
+    else if (e.key === 'ArrowLeft') animateTo(target - 1);
+    else if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); tap(els.get(Math.round(pos))); }
+  });
+  let wheelAcc = 0;
+  stage.addEventListener('wheel', e => {
+    e.preventDefault(); wheelAcc += (Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY);
+    if (Math.abs(wheelAcc) > 40){ animateTo(target + Math.sign(wheelAcc)); wheelAcc = 0; }
+  }, { passive: false });
+
+  // ---------- sound (synthesised, no files) ----------
+  const sfx = (() => {
+    let ctx = null, noise = null, on = store.get('dv-sound') !== 'off';
+    const btn = $('snd');
+    const paint = () => { btn.setAttribute('aria-pressed', String(on)); $('sndOn').hidden = !on; $('sndOff').hidden = on; };
+    paint();
+    btn.addEventListener('click', () => { on = !on; store.set('dv-sound', on ? 'on' : 'off'); paint(); if (on) wake(), tick(); });
+    function wake(){
+      try {
+        if (!ctx){ const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return; ctx = new AC(); }
+        if (ctx.state === 'suspended') ctx.resume();
+        if (!noise){
+          const len = ctx.sampleRate * 2, buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+          for (let i = 0; i < len; i++){
+            let v = (Math.random() * 2 - 1) * 0.05;                    // surface hiss
+            if (Math.random() < 0.0009) v += (Math.random() < .5 ? -1 : 1) * (0.4 + Math.random() * 0.6); // pops
+            d[i] = v;
+          }
+          noise = buf;
+        }
+      } catch(e){ ctx = null; }
+    }
+    window.addEventListener('pointerdown', wake, { passive: true });
+    window.addEventListener('keydown', wake);
+    const ok = () => on && ctx && ctx.state === 'running' && noise;
+    function crackle(dur, vol){
+      if (!ok()) return;
+      const t = ctx.currentTime, src = ctx.createBufferSource(); src.buffer = noise; src.loop = true;
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2400; bp.Q.value = 0.6;
+      const g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.15); g.gain.setValueAtTime(vol, t + dur - 0.6); g.gain.linearRampToValueAtTime(0, t + dur);
+      src.connect(bp).connect(g).connect(ctx.destination); src.start(t, Math.random()); src.stop(t + dur + 0.05);
+    }
+    function whoosh(){
+      if (!ok()) return;
+      const t = ctx.currentTime, src = ctx.createBufferSource(); src.buffer = noise;
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(300, t); lp.frequency.exponentialRampToValueAtTime(1800, t + 0.5);
+      const g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.5, t + 0.25); g.gain.linearRampToValueAtTime(0, t + 0.6);
+      src.connect(lp).connect(g).connect(ctx.destination); src.start(t); src.stop(t + 0.65);
+    }
+    function thump(){
+      if (!ok()) return;
+      const t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'sine'; o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.18);
+      g.gain.setValueAtTime(0.35, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+      o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + 0.32);
+    }
+    function tick(){
+      if (!ok()) return;
+      const t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'triangle'; o.frequency.value = 1500 + Math.random() * 300;
+      g.gain.setValueAtTime(0.08, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+      o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + 0.05);
+    }
+    return { tick, slide(){ whoosh(); }, drop(){ thump(); } };
+  })();
+
+  // ---------- what do I play tonight ----------
+  $('roll').addEventListener('click', () => {
+    if (LIST.length < 2 || rolling) return;
+    if (flippedId !== null) closeFlip();
+    let to; do { to = Math.floor(Math.random() * LIST.length); } while (to === Math.round(pos));
+    if (anim) cancelAnimationFrame(anim), anim = null;
+    unsettle(); rolling = true; $('roll').disabled = true;
+    const from = pos, dist = to - from, dur = Math.min(3200, 1400 + Math.abs(dist) * 12), t0 = performance.now();
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const step = now => {
+      const k = reduce ? 1 : Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 4);
+      pos = from + dist * e; render();
+      if (k < 1){ anim = requestAnimationFrame(step); return; }
+      pos = target = to; render(); anim = null; rolling = false; $('roll').disabled = false; settle();
+    };
+    anim = requestAnimationFrame(step);
+  });
+
+  // ---------- Spotify ----------
+  function spotBlock(r){
+    const box = document.createElement('div'); box.className = 'spot';
+    const row = document.createElement('div'); row.className = 'row';
+    const a = document.createElement('a'); a.className = 'sbtn'; a.target = '_blank'; a.rel = 'noopener';
+    a.href = 'https://open.spotify.com/search/' + encodeURIComponent(`${r.a} ${r.t}`); a.textContent = 'Zoek op Spotify ↗';
+    row.appendChild(a); box.appendChild(row);
+    return box;
+  }
+
+  // ---------- statistics ----------
+  function openStats(){
+    const box = $('stats'); box.textContent = '';
+    const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+    const inn = el('div', 'in'); box.appendChild(inn);
+    const top = el('div', 'top'); top.appendChild(el('h2', null, 'Je collectie'));
+    const x = el('button', 'iconbtn'); x.setAttribute('aria-label', 'Sluiten');
+    x.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+    x.addEventListener('click', closeStats);
+    const gear = el('button', 'iconbtn'); gear.setAttribute('aria-label', 'Account en vernieuwen');
+    gear.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>';
+    gear.addEventListener('click', () => { closeStats(); openSetup(); });
+    top.append(gear, x); inn.appendChild(top);
+    const go = fn => () => { closeStats(); fn(); buildChips(); apply(); };
+    const reset = () => { state.q = ''; $('q').value = ''; state.genre = null; state.decade = null; state.colored = false; };
+
+    const artists = {}; ALL.forEach(r => { artists[r.a] = (artists[r.a] || 0) + 1; });
+    const yrs = ALL.map(r => r.sy).filter(y => y < 9999);
+    const oldest = ALL.filter(r => r.sy === Math.min(...yrs))[0];
+    const tiles = el('div', 'tiles');
+    [[ALL.length, 'platen'], [Object.keys(artists).length, 'artiesten'], [ALL.filter(r => r.v).length, 'in gekleurd vinyl'], [Math.min(...yrs), 'oudste: ' + (oldest ? oldest.a : '')]]
+      .forEach(([n, l]) => { const t = el('div', 'tile'); t.append(el('b', null, String(n)), el('span', null, l)); tiles.appendChild(t); });
+    inn.appendChild(tiles);
+
+    // per decade (original release year)
+    const dec = {}; yrs.forEach(y => { const k = Math.floor(y / 10) * 10; dec[k] = (dec[k] || 0) + 1; });
+    const dk = Object.keys(dec).map(Number).sort((a, b) => a - b);
+    const sec1 = el('div', 'sec'); sec1.append(el('h3', null, 'Per decennium'), el('p', 'note', 'Volgens het jaar van de originele uitgave. Tik op een staaf om te filteren.'));
+    const cols = el('div', 'cols'), xl = el('div', 'xl'); const mx = Math.max(...dk.map(k => dec[k]));
+    dk.forEach(k => {
+      const c = el('button', 'col'); c.setAttribute('aria-label', `${k}'s: ${dec[k]} platen`); c.title = `${k}–${k + 9}: ${dec[k]} platen`;
+      const b = el('div', 'bar'); b.style.height = (dec[k] / mx * 100 * 0.82).toFixed(1) + '%';
+      c.append(el('span', 'v', String(dec[k])), b); c.addEventListener('click', go(() => { reset(); state.decade = k; }));
+      cols.appendChild(c); xl.appendChild(el('span', null, `'${String(k).slice(2)}`));
+    });
+    sec1.append(cols, xl); inn.appendChild(sec1);
+
+    const hbars = (title, note, entries, onPick) => {
+      const sec = el('div', 'sec'); sec.appendChild(el('h3', null, title)); if (note) sec.appendChild(el('p', 'note', note));
+      const rows = el('div', 'rows'); const m = Math.max(...entries.map(e => e[1]));
+      entries.forEach(([name, n]) => {
+        const r = el('button', 'hrow'); r.setAttribute('aria-label', `${name}: ${n}`);
+        const tr = el('div', 'track'), b = el('div', 'bar'); b.style.width = (n / m * 100).toFixed(1) + '%'; tr.appendChild(b);
+        r.append(el('span', 'n', name), tr, el('span', 'v', String(n))); r.addEventListener('click', go(() => { reset(); onPick(name); }));
+        rows.appendChild(r);
+      });
+      sec.appendChild(rows); inn.appendChild(sec);
+    };
+    hbars('Top 10 artiesten', 'Tik op een naam om alleen die platen te zien.', Object.entries(artists).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 10), n => { state.q = n; $('q').value = n; });
+    const g = {}; ALL.forEach(r => r.g.forEach(x => g[x] = (g[x] || 0) + 1));
+    hbars('Genres', 'Een plaat kan meerdere genres hebben.', Object.entries(g).sort((a, b) => b[1] - a[1]), n => { state.genre = n; });
+    const st = {}; ALL.forEach(r => (r.st || []).forEach(x => st[x] = (st[x] || 0) + 1));
+    hbars('Top 10 stijlen', null, Object.entries(st).sort((a, b) => b[1] - a[1]).slice(0, 10), n => { state.q = n; $('q').value = n; });
+
+    // added per year
+    const add = {}; ALL.forEach(r => { const y = +String(r.add).slice(0, 4); if (y) add[y] = (add[y] || 0) + 1; });
+    const ak = Object.keys(add).map(Number).sort((a, b) => a - b);
+    if (ak.length){
+      const sec = el('div', 'sec'); sec.append(el('h3', null, 'Toegevoegd aan Discogs per jaar'));
+      const c2 = el('div', 'cols'), x2 = el('div', 'xl'); const m2 = Math.max(...ak.map(k => add[k]));
+      ak.forEach(k => { const c = el('div', 'col'); c.style.cursor = 'default'; c.title = `${k}: ${add[k]} platen`; const b = el('div', 'bar'); b.style.height = (add[k] / m2 * 100 * 0.82).toFixed(1) + '%'; c.append(el('span', 'v', String(add[k])), b); c2.appendChild(c); x2.appendChild(el('span', null, `'${String(k).slice(2)}`)); });
+      sec.append(c2, x2); inn.appendChild(sec);
+    }
+
+    // coloured vinyl
+    const colored = ALL.filter(r => r.v);
+    if (colored.length){
+      const sec = el('div', 'sec'); sec.append(el('h3', null, 'Je gekleurd vinyl'), el('p', 'note', 'Tik op een plaat om ernaartoe te gaan.'));
+      const sw = el('div', 'swatches');
+      colored.forEach(r => {
+        const b = el('button', 'sw'); b.setAttribute('aria-label', `${r.a} – ${r.t}, ${r.v.name}`); b.title = `${r.a} – ${r.t} (${r.v.name})`;
+        const i = el('i'); i.style.background = discBg(r.v); b.append(i, el('span', null, r.a));
+        b.addEventListener('click', () => { closeStats(); reset(); buildChips(); apply(); const k = LIST.findIndex(z => z.id === r.id); if (k >= 0) animateTo(k); });
+        sw.appendChild(b);
+      });
+      sec.appendChild(sw); inn.appendChild(sec);
+    }
+    inn.appendChild(el('p', 'credit', 'Gegevens en hoezen van Discogs (' + (acct ? acct.user : '') + ').'));
+    box.hidden = false; box.scrollTop = 0;
+  }
+  function closeStats(){ $('stats').hidden = true; }
+  $('statsBtn').addEventListener('click', () => { if (ALL.length) openStats(); });
+  window.addEventListener('keydown', e => { if (e.key === 'Escape') closeStats(); });
+
+  // ---------- letters ----------
+  function letterOf(r){ const c = (r.s[0] || '#').toUpperCase(); return /[A-Z]/.test(c) ? c : '#'; }
+  function buildLetters(){
+    const box = $('letters'); box.textContent = '';
+    const first = {}; LIST.forEach((r, i) => { const L = letterOf(r); if (!(L in first)) first[L] = i; });
+    '#ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').forEach(L => {
+      const b = document.createElement('button'); b.textContent = L; b.dataset.l = L; b.disabled = !(L in first);
+      b.setAttribute('aria-label', L === '#' ? 'Cijfers' : 'Letter ' + L);
+      b.addEventListener('click', () => { if (L in first) animateTo(first[L]); });
+      box.appendChild(b);
+    });
+    box._first = first;
+  }
+  // drag along the letter strip
+  (() => {
+    const box = $('letters'); let bub = null, active = false;
+    const pick = e => {
+      const el = document.elementFromPoint(e.clientX, box.getBoundingClientRect().top + 18);
+      if (!el || !el.dataset || !el.dataset.l || el.disabled) return;
+      const rect = box.getBoundingClientRect();
+      if (!bub){ bub = document.createElement('div'); bub.className = 'bubble'; box.appendChild(bub); }
+      bub.textContent = el.dataset.l; bub.style.left = (e.clientX - rect.left) + 'px';
+      const i = box._first[el.dataset.l];
+      if (i !== undefined && i !== target) animateTo(i);
+    };
+    box.addEventListener('pointerdown', e => { active = true; box.setPointerCapture(e.pointerId); pick(e); });
+    box.addEventListener('pointermove', e => { if (active) pick(e); });
+    const stop = () => { active = false; if (bub){ bub.remove(); bub = null; } };
+    box.addEventListener('pointerup', stop); box.addEventListener('pointercancel', stop);
+  })();
+
+  // ---------- search + filters ----------
+  $('toggle').addEventListener('click', () => {
+    const p = $('panel'), open = p.hidden; p.hidden = !open;
+    $('toggle').setAttribute('aria-expanded', String(open));
+    layout(); render();
+    if (open) $('q').focus({ preventScroll: true });
+  });
+  let qt; $('q').addEventListener('input', e => { clearTimeout(qt); qt = setTimeout(() => { state.q = e.target.value; apply(); }, 180); });
+  function chip(label, n, pressed, onClick, extra){
+    const b = document.createElement('button'); b.className = 'chip' + (extra ? ' ' + extra : ''); b.setAttribute('aria-pressed', String(pressed));
+    b.append(label); if (n !== null){ const s = document.createElement('small'); s.textContent = n; b.append(s); }
+    b.addEventListener('click', onClick); return b;
+  }
+  function buildChips(){
+    const A = $('chipsA'), B = $('chipsB'); A.textContent = ''; B.textContent = '';
+    const g = {}; ALL.forEach(r => r.g.forEach(x => g[x] = (g[x] || 0) + 1));
+    A.append(chip('Alle genres', null, !state.genre, () => { state.genre = null; buildChips(); apply(); }));
+    Object.entries(g).sort((a, b) => b[1] - a[1]).forEach(([k, n]) =>
+      A.append(chip(k, n, state.genre === k, () => { state.genre = state.genre === k ? null : k; buildChips(); apply(); })));
+    const nc = ALL.filter(r => r.v).length;
+    B.append(chip('Gekleurd vinyl', nc, state.colored, () => { state.colored = !state.colored; buildChips(); apply(); }, 'vin'));
+    const d = {}; ALL.forEach(r => { if (r.sy < 9999){ const k = Math.floor(r.sy / 10) * 10; d[k] = (d[k] || 0) + 1; } });
+    Object.keys(d).map(Number).sort((a, b) => a - b).forEach(k =>
+      B.append(chip(`${String(k).slice(2)}'s`, d[k], state.decade === k, () => { state.decade = state.decade === k ? null : k; buildChips(); apply(); })));
+  }
+})();
+</script>
+<script>
+if ("serviceWorker" in navigator) addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+</script>
+</body>
+</html>
